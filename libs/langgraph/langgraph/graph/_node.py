@@ -8,6 +8,7 @@ from langchain_core.runnables import Runnable, RunnableConfig
 from langgraph.store.base import BaseStore
 
 from langgraph._internal._typing import EMPTY_SEQ
+from langgraph.errors import NodeError
 from langgraph.runtime import Runtime
 from langgraph.types import (
     CachePolicy,
@@ -84,6 +85,25 @@ StateNode: TypeAlias = (
     | _NodeWithConfigWriterStore[NodeInputT]
     | _NodeWithRuntime[NodeInputT, ContextT]
     | Runnable[NodeInputT, Any]
+)
+
+
+class _ErrorHandler(Protocol[NodeInputT_contra]):
+    def __call__(self, state: NodeInputT_contra, *, error: NodeError) -> Any: ...
+
+
+class _ErrorHandlerWithRuntime(Protocol[NodeInputT_contra, ContextT]):
+    def __call__(
+        self, state: NodeInputT_contra, *, error: NodeError, runtime: Runtime[ContextT]
+    ) -> Any: ...
+
+
+# An error handler is any node, or a callable that also takes the injected
+# `error: NodeError` keyword.
+ErrorHandlerNode: TypeAlias = (
+    StateNode[NodeInputT, ContextT]
+    | _ErrorHandler[NodeInputT]
+    | _ErrorHandlerWithRuntime[NodeInputT, ContextT]
 )
 
 

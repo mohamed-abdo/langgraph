@@ -7,7 +7,9 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
+from langgraph.errors import NodeError
 from langgraph.graph import StateGraph
+from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 
@@ -159,3 +161,41 @@ def test_add_node_with_explicit_input_schema() -> None:
     # because it violates the principles of contravariance
     workflow.add_node("a_narrow", a, input_schema=ANarrow)  # type: ignore[arg-type]
     workflow.add_node("b_narrow", b, input_schema=BNarrow)  # type: ignore[arg-type]
+
+
+def test_error_handler_with_injected_error() -> None:
+    class State(TypedDict):
+        log: Annotated[list[str], add]
+
+    class Context(TypedDict):
+        user: str
+
+    def fail(state: State) -> State:
+        raise ValueError("boom")
+
+    def handler(state: State, error: NodeError) -> State:
+        return {"log": [f"{error.node}: {error.error}"]}
+
+    def handler_with_runtime(
+        state: State, error: NodeError, runtime: Runtime[Context]
+    ) -> State:
+        return {"log": [f"{runtime.context['user']} {error.node}: {error.error}"]}
+
+    node_level = (
+        StateGraph(State, context_schema=Context)
+        .add_node("a", fail, error_handler=handler)
+        .set_entry_point("a")
+        .compile()
+    )
+    graph_default = (
+        StateGraph(State, context_schema=Context)
+        .set_node_defaults(error_handler=handler_with_runtime)
+        .add_node("a", fail)
+        .set_entry_point("a")
+        .compile()
+    )
+
+    assert node_level.invoke({"log": []}, context={"user": "u"}) == {"log": ["a: boom"]}
+    assert graph_default.invoke({"log": []}, context={"user": "u"}) == {
+        "log": ["u a: boom"]
+    }
